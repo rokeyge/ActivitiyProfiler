@@ -3,17 +3,13 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
-import java.sql.NClob;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
+import java.util.Iterator;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 
-import javax.swing.text.html.HTMLDocument.Iterator;
 
 public class ActivityProfiler {
     private final static String LOCATION_PATH = "/home/rokey/Work/workspace/activityProfiler/locations/";
@@ -26,18 +22,20 @@ public class ActivityProfiler {
 
     private static final long MERGE_THRESHOLD = 3600000; // 1 hour in millisecs
 
-    private static final int TRANSITION_COUNT_THRESHOLD = 3; // 3 transition to
+    private static final int TRANSITION_COUNT_THRESHOLD = 5; // 3 transition to
                                                              // an already
                                                              // identified
                                                              // activity
 
     private static final long MAJOR_MERGE_THRESHOLD = 86400000; // 24 hrs
 
-    private static final int TRANSITION_TOTAL_COUNT_THRESHOLD = 7; // 10
+    private static final int TRANSITION_TOTAL_COUNT_THRESHOLD = 10; // 10
                                                                    // transitions
                                                                    // within 24
                                                                    // hrs
 
+    private static HashSet<Integer> mAllCids = new HashSet<Integer>();
+    
     public static void main(String[] args) {
         File locationFile = new File(LOCATION_PATH + FILE_NAME);
         if (!locationFile.exists()) {
@@ -63,6 +61,14 @@ public class ActivityProfiler {
             }
 
             in.close();
+            
+            System.out.println("Total cid number including -1 " + mAllCids.size());
+            
+//            printCidLocations();
+            
+//            printActivitiesLocations();
+            
+            printActivitiesForMatLab();
 
         } catch (FileNotFoundException e) {
             // TODO Auto-generated catch block
@@ -70,6 +76,82 @@ public class ActivityProfiler {
         } catch (IOException e) {
             // TODO Auto-generated catch block
             e.printStackTrace();
+        }
+    }
+
+    private static void printActivitiesForMatLab() {
+        Iterator<String> iterator = mActivities.keySet().iterator();
+        while (iterator.hasNext()){
+            StringBuffer strBuf = new StringBuffer();
+            String actId = iterator.next();
+            ActivityStats actStats = mActivities.get(actId);            
+            Iterator<Integer> cidIter = actStats.mCids.iterator();
+            while (cidIter.hasNext()){
+                int cid = cidIter.next();
+                CidStats cStat = mCidStats.get(cid);
+                strBuf.append(matlabPrintLocList(actId, cStat.getLocations()));                
+            }
+//            System.out.println("<" + actId + ">");
+            System.out.print(strBuf.toString());
+        }
+    }
+
+    private static Object matlabPrintLocList(String actId, ArrayList<LatLong> locList) {
+        StringBuffer strBuf = new StringBuffer();
+        Iterator<LatLong> iterator = locList.iterator();
+        while (iterator.hasNext()){
+            LatLong latLong = iterator.next();
+            strBuf.append(actId);
+            strBuf.append("\t");
+            strBuf.append(latLong.latitude);
+            strBuf.append("\t");
+            strBuf.append(latLong.longitude);
+            strBuf.append("\n");
+        }
+        return strBuf.toString();
+    }
+
+    private static void printActivitiesLocations() {
+        System.out.println("Activities locations:");
+        Iterator<String> iterator = mActivities.keySet().iterator();
+        while (iterator.hasNext()){
+            StringBuffer strBuf = new StringBuffer();
+            String actId = iterator.next();
+            ActivityStats actStats = mActivities.get(actId);            
+            Iterator<Integer> cidIter = actStats.mCids.iterator();
+            while (cidIter.hasNext()){
+                int cid = cidIter.next();
+                CidStats cStat = mCidStats.get(cid);
+                strBuf.append(prettyPrintLocList(cid, cStat.getLocations()));                
+            }
+            System.out.println("<" + actId + ">");
+            System.out.println(strBuf.toString());
+        }
+    }
+    
+    private static String prettyPrintLocList(Integer cid, ArrayList<LatLong> locList){
+        StringBuffer strBuf = new StringBuffer();
+        Iterator<LatLong> iterator = locList.iterator();
+        while (iterator.hasNext()){
+            LatLong latLong = iterator.next();
+            strBuf.append(cid);
+            strBuf.append("\t");
+            strBuf.append(latLong.latitude);
+            strBuf.append("\t");
+            strBuf.append(latLong.longitude);
+            strBuf.append("\n");
+        }
+        return strBuf.toString();
+    }
+
+    private static void printCidLocations() {
+        System.out.println("Cid locations:");
+        Iterator<Integer> iterator = mCidStats.keySet().iterator();
+        while (iterator.hasNext()){
+            int cid = iterator.next();
+            CidStats cStats = mCidStats.get(cid);
+            System.out.println("<"+cid+">");
+            System.out.println(prettyPrintLocList(cid, cStats.getLocations()));
         }
     }
 
@@ -107,6 +189,7 @@ public class ActivityProfiler {
             float netLat = Float.parseFloat(splits[5]);
 
             int cid = Integer.parseInt(splits[6]);
+            mAllCids.add(cid);
 
             int lac = Integer.parseInt(splits[7]);
 
@@ -144,6 +227,10 @@ public class ActivityProfiler {
                 thisCInfo.incTransitonCount(mLastCid);
                 if (lastCInfo != null)
                     lastCInfo.incTransitonCount(cid);
+                
+                // We are also interested in the GPS coordinates if possible
+                LatLong latLong = new LatLong(gpsLat, gpsLong);
+                thisCInfo.addLocation(latLong);
             }
 
             mLastCid = cid;
@@ -196,6 +283,7 @@ public class ActivityProfiler {
             HashSet<Integer> cids = activity.getCids();
             HashMap<String, ActivityStats> activitiesToMerge = new HashMap<String, ActivityStats>();
             java.util.Iterator<Integer> cidIter = cids.iterator();
+            
             // Go through all cids of this activity
             while (cidIter.hasNext()) {
                 int cid = cidIter.next();
@@ -241,15 +329,22 @@ public class ActivityProfiler {
             // TODO: What if cells connect to different activities? They
             // probably shouldn't be in the sam activity to start off with!
             if (activitiesToMerge.size() > 0) {
-                activitiesToMerge.put(activity.getId(), activity);
+                
+                // In case if the current activity has already been mapped
+                String actId = activity.getId();               
+                while (mergeMap.containsKey(actId)){
+                    actId = mergeMap.get(actId);
+                    activity = postMergeActivities.get(actId);
+                }
+                
+                activitiesToMerge.put(actId, activity);
                 // If we merge here, the loop will be invalid, so we need to
-                // delay the merge action
+                // delay the merge action                
                 ActivityStats newActivity = doMergeActivities(activitiesToMerge, mergeMap,
                         postMergeActivities);
 
-                // Remove merged activities from the new list
-                Set<String> removeKeys = activitiesToMerge.keySet();
-                java.util.Iterator<String> removeKeyIter = removeKeys.iterator();
+                // Remove merged activities from the new list                
+                java.util.Iterator<String> removeKeyIter = activitiesToMerge.keySet().iterator();
                 while (removeKeyIter.hasNext()) {
                     postMergeActivities.remove(removeKeyIter.next());
                 }
@@ -276,6 +371,10 @@ public class ActivityProfiler {
         java.util.Iterator<Integer> unprocCidIter = mUnprocessedCids.iterator();
         while (unprocCidIter.hasNext()) {
             int uCid = unprocCidIter.next();
+            if (uCid == -1){
+                continue;
+            }
+            
             CidStats cStats = mCidStats.get(uCid);
             // Check if the cell actually belongs to a larger group
 
@@ -356,35 +455,13 @@ public class ActivityProfiler {
         Set<String> actIds = activitiesToMerge.keySet();
         java.util.Iterator<String> iter = actIds.iterator();
 
-        HashMap<String, ActivityStats> realActivitiesToMerge = new HashMap<String, ActivityStats>();
-
-        // Go through once and replace all that has been merged already
-        while (iter.hasNext()) {
-            String actId = iter.next();
-            if (mergeMap.containsKey(actId)) {
-                String mergedId = mergeMap.get(actId);
-                ActivityStats actStats = mActivities.get(mergedId);
-                if (actStats == null) {
-                    actStats = postMergeActivities.get(mergedId);
-                }
-                realActivitiesToMerge.put(actId, actStats);
-            } else {
-                realActivitiesToMerge.put(actId, activitiesToMerge.get(actId));
-            }
-        }
-
         // Now perform merge
         ActivityStats newActivity = new ActivityStats();
         ArrayList<Integer> totalCids = new ArrayList<Integer>();
 
-        Set<String> realActIds = realActivitiesToMerge.keySet();
-        java.util.Iterator<String> realInter = realActIds.iterator();
-        while (realInter.hasNext()) {
-            ActivityStats actStats = realActivitiesToMerge.get(realInter.next());
-            if (actStats == null) {
-                System.err.println("Failed to fetch activity stats");
-                return null;
-            }
+        while (iter.hasNext()) {
+            ActivityStats actStats = activitiesToMerge.get(iter.next());
+
             HashSet<Integer> cids = actStats.getCids();
             totalCids.addAll(cids); // Need to check if it is possible to have
                                     // repeat cids
@@ -402,9 +479,7 @@ public class ActivityProfiler {
             if (cidStats != null){
                 cidStats.setActivity(newActivity);
             }
-        }
-            
-
+        }            
         return newActivity;
     }
 
@@ -415,6 +490,9 @@ public class ActivityProfiler {
         java.util.Iterator<Integer> unprocInter = mUnprocessedCids.iterator();
         while (unprocInter.hasNext()) {
             Integer unprocCid = unprocInter.next();
+            if (unprocCid == -1){
+                continue;
+            }
             CidStats cStats = mCidStats.get(unprocCid);
             long duration = cStats.getDuration();
 //            long totalDuration = cStats.getTotalDuration();
@@ -490,8 +568,8 @@ public class ActivityProfiler {
 
         mUnprocessedCids = cidsStillUnProcessed;
         
-        System.out.println("Minor merge performed:");
-        printActivities();
+//        System.out.println("Minor merge performed:");
+//        printActivities();
         
         // Reset stats of all cids
         Set<Integer> keySet = mCidStats.keySet();
@@ -503,5 +581,5 @@ public class ActivityProfiler {
             cStats.resetTransitionCounts();
         }
 
-    }
+    }   
 }
