@@ -104,7 +104,7 @@ public class CidStats {
         // Calculate the distance, if very different (500 meters) to all places recorded, note it down        
         for (int i=0; i< mLocations.size(); i++){
             double distance  = distanceBetween(mLocations.get(i), latLong);
-            if (distance > 500){
+            if (distance > 5){
                 newLocation = true;
                 diffCounter++;
             }

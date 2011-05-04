@@ -2,7 +2,7 @@
 public class LatLong {
     public float latitude;
     public float longitude;
-    public LatLong(float gpsLat, float gpsLong) {
+    public LatLong(Float gpsLat, Float gpsLong) {
         latitude = gpsLat;
         longitude = gpsLong;
     }
