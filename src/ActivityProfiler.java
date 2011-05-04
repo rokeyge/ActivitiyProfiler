@@ -90,11 +90,11 @@ public class ActivityProfiler {
             String actId = iterator.next();
             ActivityStats actStats = mActivities.get(actId);
             
-            ArrayList<LatLong> randomCStatLocs = mCidStats.get(actStats.getCids().toArray()[0]).getLocations();
-            if (randomCStatLocs.size() != 0 && randomCStatLocs.get(0).longitude > 0)
-            {
-                continue;
-            }
+            // For narseo to separate UK and spain activities
+//            HashSet<Integer> cids = actStats.getCids();
+//            if (cids.contains(167914052)){
+//                System.out.print("hi");
+//            }
             
             if (noTemporal && actStats.isTemporal()){
                 continue;
@@ -104,6 +104,12 @@ public class ActivityProfiler {
             while (cidIter.hasNext()) {
                 int cid = cidIter.next();
                 CidStats cStat = mCidStats.get(cid);
+                
+                // For narseo's data
+                if (cStat.getLocations().size()>0 && cStat.getLocations().get(0).longitude > 0){
+                    continue;
+                }
+                
                 strBuf.append(produceMatlabLocList(counter, cid, cStat.getLocations()));
             }
             // System.out.println("<" + actId + ">");
@@ -505,166 +511,12 @@ public class ActivityProfiler {
 
         // System.out.println("Before major merge");
         // printActivities();
-
-        HashMap<String, String> mergeMap = new HashMap<String, String>(); // Which
-        // activity
-        // has already
-        // mapped to
-        // which
-        HashMap<String, ActivityStats> postMergeActivities = new HashMap<String, ActivityStats>();
-
-        // Go through activities and merge them based on transition counts of
-        // the CIDs
-        Set<String> activityIdSet = mActivities.keySet();
-        java.util.Iterator<String> iterator = activityIdSet.iterator();
-        while (iterator.hasNext()) {
-            ActivityStats activity = mActivities.get(iterator.next());
-            HashSet<Integer> cids = activity.getCids();
-            HashMap<String, ActivityStats> activitiesToMerge = new HashMap<String, ActivityStats>();
-            java.util.Iterator<Integer> cidIter = cids.iterator();
-
-            // Go through all cids of this activity
-            while (cidIter.hasNext()) {
-                int cid = cidIter.next();
-                CidStats cidStats = mCidStats.get(cid);
-                if (cidStats == null) {
-                    continue;
-                }
-                HashMap<Integer, Integer> transitions = cidStats.getTotalTransitionCounts();
-                Set<Integer> connectedCids = transitions.keySet();
-                java.util.Iterator<Integer> iter = connectedCids.iterator();
-
-                ActivityStats nActivity = null;
-                int higestCount = 0;
-
-                // Check the cid's most visited neighbours
-                while (iter.hasNext()) {
-                    int nCid = iter.next();
-
-                    // Skip the cells this cell already connected to
-                    if (cidStats.getActivity().getCids().contains(nCid)) {
-                        continue;
-                    }
-
-                    int nCount = transitions.get(nCid);
-                    if (nCount > TRANSITION_TOTAL_COUNT_THRESHOLD) {
-                        CidStats nCstats = mCidStats.get(nCid);
-                        if (nCstats != null) {
-
-                            // Merge with the cell that transition
-                            // to the most and has an activity
-                            nActivity = nCstats.getActivity();
-                            higestCount = nCount;
-
-                        }// end if nCstats != null
-                    } // end if count > threshold
-                } // end if iter.hasNext()
-
-                if (nActivity != null) {
-                    activitiesToMerge.put(nActivity.getId(), nActivity);
-                }
-            }// end loop cids
-
-            // TODO: What if cells connect to different activities? They
-            // probably shouldn't be in the sam activity to start off with!
-            if (activitiesToMerge.size() > 0) {
-
-                // In case if the current activity has already been mapped
-                String actId = activity.getId();
-                while (mergeMap.containsKey(actId)) {
-                    actId = mergeMap.get(actId);
-                    activity = postMergeActivities.get(actId);
-                }
-
-                activitiesToMerge.put(actId, activity);
-                // If we merge here, the loop will be invalid, so we need to
-                // delay the merge action
-                ActivityStats newActivity = doMergeActivities(activitiesToMerge, mergeMap);
-
-                // Remove merged activities from the new list
-                java.util.Iterator<String> removeKeyIter = activitiesToMerge.keySet().iterator();
-                while (removeKeyIter.hasNext()) {
-                    postMergeActivities.remove(removeKeyIter.next());
-                }
-
-                // put the new one in
-                postMergeActivities.put(newActivity.getId(), newActivity);
-            } else {
-                // No merge for this activity, keep it as it is
-                // If this has not already been merged
-                Set<String> mergedCids = mergeMap.keySet();
-                if (!mergedCids.contains(activity.getId())) {
-                    postMergeActivities.put(activity.getId(), activity);
-                }
-            }
-        } // end loop mActivities
-
-        mActivities = new HashMap<String, ActivityStats>(postMergeActivities);
-
-        // Go through the set of set of activities tagged, then merge them
-
-        // Go through the unprocessed CIDs and merge with cells with known
-        // activities that transit to them a lot
-        HashSet<Integer> unProcessedCids = new HashSet<Integer>();
-        java.util.Iterator<Integer> unprocCidIter = mUnprocessedCids.iterator();
-        while (unprocCidIter.hasNext()) {
-            int uCid = unprocCidIter.next();
-            if (uCid == -1) {
-                continue;
-            }
-
-            CidStats cStats = mCidStats.get(uCid);
-            // Check if the cell actually belongs to a larger group
-
-            HashMap<Integer, Integer> transitionCounts = cStats.getTotalTransitionCounts();
-            Set<Integer> connectedCids = transitionCounts.keySet();
-            java.util.Iterator<Integer> iter = connectedCids.iterator();
-
-            ActivityStats nActivity = null;
-            int higestCount = 0;
-
-            while (iter.hasNext()) {
-                int cid = iter.next();
-                int count = transitionCounts.get(cid);
-
-                if (count > TRANSITION_TOTAL_COUNT_THRESHOLD) {
-                    CidStats nCstats = mCidStats.get(cid);
-
-                    // Maybe the device hasn't yet switched to its
-                    // neighbouring cells, then don't care
-                    if (nCstats != null) {
-
-                        if (count > higestCount) {
-                            nActivity = nCstats.getActivity();
-                            higestCount = count;
-                        }
-
-                    }// end if nCstats != null
-                } // end if count > threshold
-            }// end while iter.next
-
-            if (nActivity != null) {
-                cStats.setActivity(nActivity);
-                nActivity.addCid(cStats.getCid());
-            } else {
-                unProcessedCids.add(cStats.getCid());
-            }
-        }// end for mUnprocessed
-        if (unProcessedCids.size() != mUnprocessedCids.size()) {
-            mUnprocessedCids = unProcessedCids;
-        }
-
-        // DEBUG: print out the activities
+    
+    
         // System.out.println("Major merge performed");
         // printActivities();
-        //
-        // System.out.println("Unprocessed cids:");
-        //
-        // unprocCidIter = mUnprocessedCids.iterator();
-        // while(unprocCidIter.hasNext()) {
-        // System.out.print(unprocCidIter.next() + ";");
-        // }
-        //
+        
+        
         // Reset all stats after 24 hours
         Set<Integer> keySet = mCidStats.keySet();
         java.util.Iterator<Integer> statIterator = keySet.iterator();
