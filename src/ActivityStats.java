@@ -69,4 +69,8 @@ public class ActivityStats {
         mTotalDuration += mConnectionDuration;
         mConnectionDuration = 0;
     }
+
+    public void resetAfterMajorMerge() {
+        mTotalDuration = 0;
+    }
 }

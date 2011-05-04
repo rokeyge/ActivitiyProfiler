@@ -13,22 +13,21 @@ import java.util.Set;
 
 public class ActivityProfiler {
 
-    private static final long DURATION_THRESHOLD = 300000; // 5 minutes in
-                                                           // millisecs
+    private static final long DURATION_THRESHOLD = 10 * 60 * 1000; 
 
-    private static final long MERGE_THRESHOLD = 14400000; // 4 hour in millisecs
+    private static final long MERGE_THRESHOLD = 4 * 60 * 60 * 1000; 
 
-    private static final int TRANSITION_COUNT_THRESHOLD = 1; // 3 transition to
-                                                             // an already
-                                                             // identified
-                                                             // activity
+    private static final int TRANSITION_COUNT_THRESHOLD = 10; 
+    
+    private static final int TRANSITION_TOTAL_COUNT_THRESHOLD = 20; 
 
-    private static final long MAJOR_MERGE_THRESHOLD = 86400000; // 24 hrs
+    private static final long MAJOR_MERGE_THRESHOLD = 24 * 60 * 60 * 1000; 
+    
+    private static final long PING_PONG_THRESHOLD = 2 * 60 * 1000; 
 
-    private static final int TRANSITION_TOTAL_COUNT_THRESHOLD = 10; // 10
-                                                                    // transitions
-                                                                    // within 24
-                                                                    // hrs
+    private static final int CIR_BUF_SIZE = 2;
+    
+    private static final long MAJOR_DURATION_THRESHOLD = 30 * 60 * 1000;
 
     private void printActivities(boolean noTemporal) {
 
@@ -66,7 +65,7 @@ public class ActivityProfiler {
                 strBuf.append("\nTransits:\n");
                 CidStats cStats = mCidStats.get(cid);
                
-                for ( Iterator<Entry<Integer, Integer>> transitIter = cStats.getTotalTransitionCounts().entrySet().iterator();
+                for ( Iterator<Entry<Integer, Integer>> transitIter = cStats.getDebugTransitionCounts().entrySet().iterator();
                 transitIter.hasNext();){
                     Entry<Integer, Integer> transit = transitIter.next();
                     strBuf.append(transit.getKey() + ">>"+transit.getValue());
@@ -90,12 +89,6 @@ public class ActivityProfiler {
             String actId = iterator.next();
             ActivityStats actStats = mActivities.get(actId);
             
-            // For narseo to separate UK and spain activities
-//            HashSet<Integer> cids = actStats.getCids();
-//            if (cids.contains(167914052)){
-//                System.out.print("hi");
-//            }
-            
             if (noTemporal && actStats.isTemporal()){
                 continue;
             }
@@ -106,10 +99,10 @@ public class ActivityProfiler {
                 CidStats cStat = mCidStats.get(cid);
                 
                 // For narseo's data
-                if (cStat.getLocations().size()>0 && cStat.getLocations().get(0).longitude > 0){
+                if (cStat.getLocations().size()>0 && cStat.getLocations().get(0).longitude < 0){
                     continue;
                 }
-                
+//                
                 strBuf.append(produceMatlabLocList(counter, cid, cStat.getLocations()));
             }
             // System.out.println("<" + actId + ">");
@@ -190,10 +183,6 @@ public class ActivityProfiler {
     private HashMap<Integer, CidStats> mCidStats = new HashMap<Integer, CidStats>();
 
     private final static int INITIAL_CID = -2;
-
-    private static final long PING_PONG_THRESHOLD = 150000; // 5 minutes
-
-    private static final int CIR_BUF_SIZE = 2;
 
     private int mLastCid = INITIAL_CID;
 
@@ -354,10 +343,10 @@ public class ActivityProfiler {
         }
 
         // Perform major merge
-        // if (epochTime - mLastMajorMerge > MAJOR_MERGE_THRESHOLD) {
-        // mLastMajorMerge = epochTime;
-        // doMajorMerge(epochTime);
-        // }
+         if (epochTime - mLastMajorMerge > MAJOR_MERGE_THRESHOLD) {
+         mLastMajorMerge = epochTime;
+         doMajorMerge(epochTime);
+         }
 
         mLastCid = cid;
     }
@@ -511,13 +500,99 @@ public class ActivityProfiler {
 
         // System.out.println("Before major merge");
         // printActivities();
-    
+        Set<String> tempActsToRemove = new HashSet<String>();
+        Set<ActivityStats> tempActsToAdd = new HashSet<ActivityStats>();
+
+        Iterator<Entry<String, ActivityStats>> tempActIter = mTemporalActivities.entrySet()
+                .iterator();
+
+        while (tempActIter.hasNext()) {
+            Entry<String, ActivityStats> tempActEntry = tempActIter.next();
+            ActivityStats tempAct = tempActEntry.getValue();
+
+            long duration = tempAct.getDuration();
+
+            // TODO: use a different threshold
+            if (duration > MAJOR_DURATION_THRESHOLD) {
+                tempAct.setTemporal(false);
+                tempActIter.remove();
+                mActivities.put(tempActEntry.getKey(), tempActEntry.getValue());
+            }
+        }
+        
+        // Go through all activities and merge highly connected ones
+        HashMap<String, String> mergeMap = new HashMap<String, String>();
+        HashMap<String,ActivityStats> actsToRemove = new HashMap<String,ActivityStats>();
+        HashMap<String,ActivityStats> actsToAdd = new HashMap<String,ActivityStats>();
+        for (Iterator<Entry<String, ActivityStats>> actIter = mActivities.entrySet().iterator(); actIter.hasNext();){
+            ActivityStats nActivity = null;
+            int highestCount = 0;
+            
+            ActivityStats actStats = actIter.next().getValue();
+            for (Iterator<Integer> cidIter = actStats.getCids().iterator();cidIter.hasNext();){
+                int cid = cidIter.next();
+//                if (cid == 65373){
+//                    System.out.println("here");
+//                }
+                CidStats cidStats = mCidStats.get(cid);
+                HashMap<Integer, Integer> totalTransitionCounts = cidStats.getTotalTransitionCounts();                
+                for (Iterator<Entry<Integer, Integer>> transitionIter = totalTransitionCounts.entrySet().iterator(); transitionIter.hasNext();){
+                    Entry<Integer, Integer> transition = transitionIter.next();
+                    int neighbourCid = transition.getKey();
+                    // Skip cid that is already in the activity
+                    if (actStats.getCids().contains(neighbourCid)){
+                        continue;
+                    }
+                    int transitCount = transition.getValue();
+                    
+                    // TODO: add other checks apart from a static threshold
+                    if (transitCount > TRANSITION_TOTAL_COUNT_THRESHOLD && transitCount > highestCount){
+                        nActivity = mCidStats.get(neighbourCid).getActivity();                        
+                        highestCount = transitCount;
+                    }
+                }
+            }
+            
+            if (highestCount > 0 && nActivity != null){
+                HashMap<String, ActivityStats> activitiesToMerge = new HashMap<String, ActivityStats>();
+                activitiesToMerge.put(nActivity.getId(), nActivity);
+                activitiesToMerge.put(actStats.getId(), actStats);
+                ActivityStats newActivity = doMergeActivities(activitiesToMerge, mergeMap);                
+                for (Iterator<Entry<String, ActivityStats>> iterator = activitiesToMerge.entrySet().iterator();iterator.hasNext();){
+                    Entry<String, ActivityStats> actEntry = iterator.next();
+                    String actId = actEntry.getKey();
+                    ActivityStats actToRemove = actEntry.getValue();
+                    actsToAdd.remove(actToRemove);
+                    if (actToRemove.isTemporal()){
+                        mTemporalActivities.remove(actId);
+                    }
+                    actsToRemove.put(actId, actToRemove);
+                }
+                actsToAdd.put(newActivity.getId(), newActivity);                
+            }
+        } // End loop mActivities
+        
+        if (actsToAdd.size() > 0){
+            mActivities.putAll(actsToAdd);
+        }
+        
+        if (actsToRemove.size() > 0){
+            for (Iterator<String> iterator = actsToRemove.keySet().iterator();iterator.hasNext();){               
+                mActivities.remove(iterator.next());
+            }
+        }
+        
     
         // System.out.println("Major merge performed");
         // printActivities();
         
         
         // Reset all stats after 24 hours
+        for (Iterator<Entry<String, ActivityStats>> actIter = mActivities.entrySet().iterator();actIter.hasNext();){
+            ActivityStats actStat = actIter.next().getValue();
+            actStat.resetAfterMajorMerge();
+        }
+        
         Set<Integer> keySet = mCidStats.keySet();
         java.util.Iterator<Integer> statIterator = keySet.iterator();
         while (statIterator.hasNext()) {
@@ -570,9 +645,9 @@ public class ActivityProfiler {
      * @param time
      */
     public void shutdown(long time) {
-//         printActivities(true);
-//         printActivitiesLocations(true);
-        printActivitiesForMatLab(true);
+         printActivities(true);
+         printActivitiesLocations(true);
+//        printActivitiesForMatLab(true);
     }
 
     /**

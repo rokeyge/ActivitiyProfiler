@@ -11,7 +11,8 @@ public class CidStats {
     private ActivityStats mActivity;
     private HashMap<Integer, Integer> mTransitionCountMap = new HashMap<Integer, Integer>();
     private long mTotalDuration;
-    private HashMap<Integer, Integer> mTotalTransitionCountMap = new HashMap<Integer, Integer>();
+    private HashMap<Integer, Integer> mTransitionCountMapMajor = new HashMap<Integer, Integer>();
+    private HashMap<Integer, Integer> mTransitionCountMapDebug = new HashMap<Integer, Integer>();
     private ArrayList<LatLong> mLocations = new ArrayList<LatLong>();
 
     public void setCid(Integer cid) {
@@ -57,20 +58,25 @@ public class CidStats {
     }
 
     public HashMap<Integer, Integer> getTotalTransitionCounts(){
-        return mTotalTransitionCountMap;
+        return mTransitionCountMapMajor;
     }
+    
+    public HashMap<Integer, Integer> getDebugTransitionCounts(){
+        return mTransitionCountMapDebug;
+    } 
+    
     public void resetTransitionCounts() {
            Iterator it = mTransitionCountMap.entrySet().iterator();
             while (it.hasNext()) {
                 Map.Entry pairs = (Map.Entry)it.next();
                 int cid = (Integer) pairs.getKey();
                 int count = (Integer) pairs.getValue();
-                Integer curCount = mTotalTransitionCountMap.get(cid);
+                Integer curCount = mTransitionCountMapMajor.get(cid);
                 if (curCount == null){
                     curCount = 0;
                 }
                 curCount+= count;
-                mTotalTransitionCountMap.put(cid, curCount);
+                mTransitionCountMapMajor.put(cid, curCount);
                 
                 // Reset value
                 pairs.setValue(0);
@@ -87,7 +93,23 @@ public class CidStats {
     }
 
     public void resetTotalTransitionCounts() {
-        mTotalTransitionCountMap = new HashMap<Integer, Integer>(); 
+        Iterator it = mTransitionCountMapMajor.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry pairs = (Map.Entry)it.next();
+            int cid = (Integer) pairs.getKey();
+            int count = (Integer) pairs.getValue();
+            Integer curCount = mTransitionCountMapDebug.get(cid);
+            if (curCount == null){
+                curCount = 0;
+            }
+            curCount+= count;
+            mTransitionCountMapDebug.put(cid, curCount);
+            
+            // Reset value
+            it.remove();
+        }
+        
+        mTransitionCountMapMajor = new HashMap<Integer, Integer>(); 
     }
 
     public ArrayList<LatLong> getLocations(){
@@ -104,7 +126,7 @@ public class CidStats {
         // Calculate the distance, if very different (500 meters) to all places recorded, note it down        
         for (int i=0; i< mLocations.size(); i++){
             double distance  = distanceBetween(mLocations.get(i), latLong);
-            if (distance > 5){
+            if (distance > 50){
                 newLocation = true;
                 diffCounter++;
             }
